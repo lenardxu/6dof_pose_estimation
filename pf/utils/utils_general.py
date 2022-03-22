@@ -2,6 +2,12 @@
 # https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
 import numpy as np
 from numpy.random import randn, random, uniform, multivariate_normal, seed
+import scipy.io as scio
+from scipy.spatial.transform import Rotation as R
+from os import path
+from PIL import Image
+
+from pf.utils.config import cfg
 
 
 def multinomial_resample(weights):
@@ -69,3 +75,37 @@ def resample_from_index(particles, weights, indexes):
     particles[:] = particles[indexes]
     weights.resize(len(particles))
     weights.fill(1.0 / len(weights))
+
+def extract_pose_from_mat(img_path):
+    meta_data = scio.loadmat(img_path)
+    poses = meta_data['poses']
+    # select the first object only for demo
+    r_t_mat = poses[:, :, cfg.obj_id]  # (3,4)
+    r = R.from_matrix(r_t_mat[:3, :3])  # Rotation objects
+    r_quat_vec = r.as_quat()  # (4,)
+    t_vec = r_t_mat[:3, 3]  # (3,)
+    return np.concatenate((t_vec, r_quat_vec))
+
+def extract_bboxes_from_dataset(meta_path, depth_img_path, bbox_path):
+    """generate the dummy bboxes to replace the bboxes predicted by object detector"""
+    meta_data = scio.loadmat(meta_path)
+    cam_scale = meta_data['factor_depth'][0][0]
+    depth_map = np.array(Image.open(depth_img_path)) / float(cam_scale)
+
+    with open(bbox_path, 'r') as f:
+        lines = f.readlines()
+    bboxes_lst = []
+    for line in lines:
+        bbox = list(map(float, line.rstrip().split(" ")[1:]))
+        for i in range(len(bbox)):
+            bbox[i] = round(bbox[i])
+        bbox[2] -= bbox[0]
+        bbox[3] -= bbox[1]
+        roi_depth_arr = depth_map[int(bbox[0]):int(bbox[0]+bbox[2]+1), int(bbox[1]):int(bbox[1]+bbox[3]+1)]
+        temp = (tuple(bbox), roi_depth_arr)
+        bboxes_lst.append(temp)
+    bboxes = tuple(bboxes_lst)
+    return bboxes
+
+
+
